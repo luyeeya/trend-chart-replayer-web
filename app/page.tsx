@@ -5,6 +5,7 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
+import { COLORS } from '../lib/colors.js';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -17,10 +18,10 @@ interface ChartState {
   instance?: echarts.ECharts;
 }
 
-const formatTimestampToUTC8 = (timestamp: string) => 
-  dayjs.utc(timestamp, 'YYYYMMDDHHmmss').tz('Asia/Shanghai').format('YYYY-MM-DD HH:mm');
+const formatTimestampToUTC8 = (timestamp: string) =>
+  dayjs.utc(timestamp, 'YYYYMMDDHHmmss').tz('Asia/Shanghai').format('YYYY-MM-DD HH:mm:ss');
 
-const createApiRequest = (url: string) => 
+const createApiRequest = (url: string) =>
   axios.get(url).then(r => r.data).catch(e => {
     console.error('Request error:', e);
     return null;
@@ -50,25 +51,92 @@ export default function MultiChartComponent() {
 
     const chart = echarts.init(element);
     chart.setOption({
+      // backgroundColor: "rgb(192, 192, 192)",
       tooltip: {
         trigger: 'axis',
-        formatter: (params: any[]) => `
-          时间: ${formatTimestampToUTC8(params[0].axisValue)}<br>
-          ${params[0].seriesName}: ${params[0].value}
-        `
+        position: { right: 10, top: 10 },
+        padding: [5, 10, 5, 10],
+        formatter: (params: any[]) => {
+          const paramClose = params.find((p) => p.seriesName === 'close');
+          if (paramClose) {
+            return `${formatTimestampToUTC8(params[0].axisValue)} <b>${paramClose.value}</b>`
+          }
+        }
       },
-      legend: { data: initialData.legend },
+      // legend: {
+      //   data: initialData.legend.map(d => { return { name: d, icon: "none", textStyle: { color: COLORS[d].color } } }),
+      //   align: 'center',
+      //   bottom: 10,
+      //   itemGap: 5,
+      //   itemWidth: 0,
+      //   itemHeight: 8,
+      // },
       xAxis: {
         type: 'category',
         data: initialData.xAxis,
-        axisLabel: { formatter: formatTimestampToUTC8 }
+        axisLabel: {
+          showMaxLabel: true,
+          formatter: (value: any) => {
+            const utc8Time = formatTimestampToUTC8(value);
+            return `${utc8Time.slice(0, 10)}\n${utc8Time.slice(11)}`;
+          }
+        }
       },
-      yAxis: { type: 'value' },
+      yAxis: [
+        {
+          id: "model",
+          type: "value",
+          axisLabel: {
+            show: false
+          },
+          axisTick: {
+            show: false
+          },
+          axisPointer: {
+            show: false
+          },
+          splitLine: {
+            show: false
+          }
+        },
+        {
+          id: "price",
+          splitLine: {
+            show: true,
+            lineStyle: {
+              color: "#EEE"
+            }
+          },
+          axisLabel: {
+            show: true
+          },
+          axisLine: {
+            show: true,
+            lineStyle: {
+              width: 2
+            }
+          },
+          axisTick: {
+            show: true
+          },
+          type: "value",
+          max: "dataMax",
+          min: "dataMin",
+          nameLocation: "middle",
+          nameRotate: 270,
+          nameGap: 30
+        }
+      ],
       series: initialData.series.map((s: any) => ({
         ...s,
         type: 'line',
+        symbol: 'none',
         smooth: true,
-        animation: false
+        animation: false,
+        yAxisIndex: ["close", "close_ma"].includes(s.name) ? 1 : 0,
+        itemStyle: {
+          color: COLORS[s.name].color
+        }
       }))
     });
 
@@ -103,7 +171,7 @@ export default function MultiChartComponent() {
         }));
 
         state.instance.setOption({
-          xAxis: [{ 
+          xAxis: [{
             data: newXData,
             axisLabel: { formatter: formatTimestampToUTC8 }
           }],
@@ -138,15 +206,14 @@ export default function MultiChartComponent() {
       Object.values(charts).forEach(state => state.instance?.dispose());
     };
   }, []);
-  
+
   return (
-    <main className="min-h-screen flex flex-col items-center p-4 space-y-6">
+    <main className="w-full h-full flex flex-col items-center">
       {(['signal', 'trend', 'scope'] as ChartType[]).map((type) => (
         <div
           key={type}
-          className="w-full max-w-8xl h-[400px] border rounded-lg shadow-sm"
+          className="w-full h-[50vh] rounded-lg shadow-sm"
           ref={el => chartRefs.current[type] = el!}
-          style={{ width: '100%', height: '400px' }} // 明确设置样式
           tabIndex={0}
           onKeyDown={(e) => e.preventDefault()}
         />
