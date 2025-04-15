@@ -6,6 +6,8 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { COLORS } from '../lib/colors.js';
+import OrderPopup from '../lib/OrderPopup';
+import ConfirmPopup from '../lib/ConfirmPopup';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
