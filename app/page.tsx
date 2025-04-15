@@ -6,8 +6,6 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { COLORS } from '../lib/colors.js';
-import OrderPopup from '../lib/OrderPopup';
-import ConfirmPopup from '../lib/ConfirmPopup';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -175,7 +173,13 @@ export default function MultiChartComponent() {
         state.instance.setOption({
           xAxis: [{
             data: newXData,
-            axisLabel: { formatter: formatTimestampToUTC8 }
+            axisLabel: {
+              showMaxLabel: true,
+              formatter: (value: any) => {
+                const utc8Time = formatTimestampToUTC8(value);
+                return `${utc8Time.slice(0, 10)}\n${utc8Time.slice(11)}`;
+              }
+            }
           }],
           series: newSeries
         }, { replaceMerge: ['xAxis', 'series'] });

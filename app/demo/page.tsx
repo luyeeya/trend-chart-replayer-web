@@ -17,6 +17,9 @@ export default function Home() {
   const chartInstanceRef = useRef<echarts.ECharts | null>(null); // 使用 useRef 存储实例
   const isMounted = useRef(true); // 标志位
 
+  const orderPopupRef = useRef<HTMLDivElement>(null); // 引用浮窗 DOM 元素
+  const confirmPopupRef = useRef<HTMLDivElement>(null); // 引用确认浮窗 DOM 元素
+
   useEffect(() => {
     isMounted.current = true;
 
@@ -50,6 +53,36 @@ export default function Home() {
       };
     }
   }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      // 检查点击是否在浮窗外部
+      if (
+        showOrderPopup &&
+        orderPopupRef.current &&
+        !orderPopupRef.current.contains(event.target as Node)
+      ) {
+        setShowOrderPopup(false);
+      }
+
+      // 检查点击是否在确认浮窗外部
+      if (
+        showConfirmPopup &&
+        confirmPopupRef.current &&
+        !confirmPopupRef.current.contains(event.target as Node)
+      ) {
+        setShowConfirmPopup(false);
+      }
+    };
+
+    // 添加全局点击事件监听器
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      // 移除全局点击事件监听器
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showOrderPopup, showConfirmPopup]);
 
   const handleBuy = () => {
     setContract('期货A');
@@ -134,22 +167,26 @@ export default function Home() {
 
       {/* 下单浮窗 */}
       {showOrderPopup && (
-        <OrderPopup
-          position={popupPosition}
-          onBuy={handleBuy}
-          onSell={handleSell}
-          onClose={handleClose}
-        />
+        <div ref={orderPopupRef}>
+          <OrderPopup
+            position={popupPosition}
+            onBuy={handleBuy}
+            onSell={handleSell}
+            onClose={handleClose}
+          />
+        </div>
       )}
 
       {/* 确认浮窗 */}
       {showConfirmPopup && (
-        <ConfirmPopup
-          contract={contract}
-          price={price}
-          onConfirm={handleConfirm}
-          onCancel={handleCancel}
-        />
+        <div ref={confirmPopupRef}>
+          <ConfirmPopup
+            contract={contract}
+            price={price}
+            onConfirm={handleConfirm}
+            onCancel={handleCancel}
+          />
+        </div>
       )}
     </div>
   );
