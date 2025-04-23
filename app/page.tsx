@@ -1,25 +1,29 @@
-'use client'
-import React, { useEffect, useRef, useState, useCallback, useLayoutEffect } from 'react';
-import * as echarts from 'echarts';
+'use client';
 import axios from 'axios';
+import React, { useEffect, useRef, useState, useLayoutEffect } from 'react';
+import StepSelector from '../lib/StepSelector';
+import * as echarts from 'echarts';
+import { COLORS } from '../lib/colors.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
-import { COLORS } from '../lib/colors.js';
-
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
 type ChartType = 'signal' | 'trend' | 'scope';
 
-interface ChartState {
-  data: any;
+interface ChartData {
+  xAxis: string[];
+  series: Record<string, number[]>;
   kTime: string;
-  instance?: echarts.ECharts;
+  instance: echarts.ECharts | null;
+  chartLength: number;
 }
 
-const formatTimestampToUTC8 = (timestamp: string) =>
-  dayjs.utc(timestamp, 'YYYYMMDDHHmmss').tz('Asia/Shanghai').format('YYYY-MM-DD HH:mm:ss');
+interface KTimeInfo {
+  min_k_time: string;
+  max_k_time: string;
+}
 
 const createApiRequest = (url: string) =>
   axios.get(url).then(r => r.data).catch(e => {
@@ -27,203 +31,230 @@ const createApiRequest = (url: string) =>
     return null;
   });
 
-export default function MultiChartComponent() {
-  const chartRefs = useRef<Record<ChartType, HTMLDivElement>>({} as any);
-  const [charts, setCharts] = useState<Record<ChartType, ChartState>>({
-    signal: { data: null, kTime: '' },
-    trend: { data: null, kTime: '' },
-    scope: { data: null, kTime: '' }
+const formatTimestampToUTC8 = (timestamp: string) => dayjs.utc(timestamp, 'YYYYMMDDHHmmss').tz('Asia/Shanghai').format('YYYY-MM-DD HH:mm:ss');
+
+// 增量更新逻辑
+function updateData(existingData: ChartData, newData: ChartData) {
+  // 更新 xAxis
+  existingData.xAxis.push(...newData.xAxis);
+  existingData.xAxis = existingData.xAxis.slice(-existingData.chartLength);
+
+  // 更新每个 series 数据
+  for (const key in newData.series) {
+    if (existingData.series[key]) {
+      existingData.series[key].push(...newData.series[key]);
+      existingData.series[key] = existingData.series[key].slice(-existingData.chartLength);
+    } else {
+      existingData.series[key] = [...newData.series[key]];
+    }
+  }
+
+  return existingData;
+}
+
+const calculateInterval = (dataLength: number, chartWidth: number) => {
+  // 根据图表宽度和数据长度动态计算 interval
+  const maxLabels = Math.floor(chartWidth / 200); // 设置每个标签占用 200px
+  return Math.max(1, Math.floor(dataLength / maxLabels));
+};
+
+const getKTimeInfo = async () => {
+  let kTimeInfo: KTimeInfo;
+  // 优先从本地存储中获取kTime
+  const storedKTimeInfo = localStorage.getItem('kTimeInfo');
+  if (storedKTimeInfo) {
+    try {
+      kTimeInfo = JSON.parse(storedKTimeInfo);
+      return kTimeInfo;
+    } catch (error) {
+      console.error('Failed to fetch kTimeInfo from LocalStorage:', error);
+    }
+  }
+
+  // 否则从服务器获取kTimeInfo
+  kTimeInfo = await createApiRequest(`http://127.0.0.1:5000/k_time_info`);
+  if (!kTimeInfo) {
+    console.error('Failed to fetch kTimeInfo from Server.');
+  }
+  return kTimeInfo;
+}
+
+export default function Home() {
+  const [data, setData] = useState<Record<ChartType, ChartData>>({
+    signal: { xAxis: [], series: {}, kTime: "20250121031000", instance: null, chartLength: 800 },
+    trend: { xAxis: [], series: {}, kTime: "20250121031000", instance: null, chartLength: 1800 },
+    scope: { xAxis: [], series: {}, kTime: "20250121031000", instance: null, chartLength: 6000 }
   });
-  const isUpdating = useRef(false);
+  const kTimeRef = useRef<string>("");
+  const chartRefs = useRef<Record<ChartType, HTMLDivElement>>({} as any);
+  const isUpdating = useRef<boolean>(false);
+  const stepRef = useRef<number>(5);
 
-  const initChart = useCallback(async (type: ChartType) => {
-    const element = chartRefs.current[type];
-    if (!element) return;
+  // 回调函数，用于接收子组件的步频值
+  const handleStepChange = (step: number) => {
+    stepRef.current = step;
+    console.log('父组件接收到的步频值:', step);
+  };
 
-    // 检查元素尺寸是否为0
-    if (element.clientWidth <= 0 || element.clientHeight <= 0) {
-      setTimeout(() => initChart(type), 100); // 延迟重试
-      return;
+  const updateChart = async (init: boolean = false) => {
+    if (init) {
+      let kTimeInfo = await getKTimeInfo();
+      if (!kTimeInfo) {
+        console.error('No kTimeInfo');
+        return;
+      }
+      kTimeRef.current = kTimeInfo.min_k_time; // useRef 更新是同步的，useState 更新是异步的
     }
 
-    const initialData = await createApiRequest(`http://127.0.0.1:5000/chart_data/${type}/20250411031900`);
-    if (!initialData?.xAxis?.length) return;
+    Object.entries(data).map(async ([type, chartData]) => {
+      const chartType = type as ChartType;
+      const chartElement = chartRefs.current[chartType];
+      if (!chartElement) return;
 
-    const chart = echarts.init(element);
-    chart.setOption({
-      // backgroundColor: "rgb(192, 192, 192)",
-      tooltip: {
-        trigger: 'axis',
-        position: { right: 10, top: 10 },
-        padding: [5, 10, 5, 10],
-        formatter: (params: any[]) => {
-          const paramClose = params.find((p) => p.seriesName === 'close');
-          if (paramClose) {
-            return `${formatTimestampToUTC8(params[0].axisValue)} <b>${paramClose.value}</b>`
-          }
-        }
-      },
-      // legend: {
-      //   data: initialData.legend.map(d => { return { name: d, icon: "none", textStyle: { color: COLORS[d].color } } }),
-      //   align: 'center',
-      //   bottom: 10,
-      //   itemGap: 5,
-      //   itemWidth: 0,
-      //   itemHeight: 8,
-      // },
-      xAxis: {
-        type: 'category',
-        data: initialData.xAxis,
-        axisLabel: {
-          showMaxLabel: true,
-          formatter: (value: any) => {
-            const utc8Time = formatTimestampToUTC8(value);
-            return `${utc8Time.slice(0, 10)}\n${utc8Time.slice(11)}`;
-          }
-        }
-      },
-      yAxis: [
-        {
-          id: "model",
-          type: "value",
-          axisLabel: {
-            show: false
-          },
-          axisTick: {
-            show: false
-          },
-          axisPointer: {
-            show: false
-          },
-          splitLine: {
-            show: false
+      const front = init;
+      const size = init ? chartData.chartLength : stepRef.current;
+      const newData: ChartData = await createApiRequest(`http://127.0.0.1:5000/chart_data/${chartType}/${kTimeRef.current}?front=${front}&size=${size}`);
+      if (!newData || !newData.xAxis || newData.xAxis.length == 0) {
+        console.error('No more data');
+        return;
+      }
+
+      const newKTime = newData.xAxis[newData.xAxis.length - 1];
+      kTimeRef.current = newKTime;
+      // 更新到localStorage中
+      // localStorage.setItem('kTimeInfo', JSON.stringify({min_k_time: newKTime})); // TODO: 需支持重置或左回放
+
+      const curData = updateData(chartData, newData);
+      const chart = init ? echarts.init(chartElement) : chartData.instance;
+      chart!.setOption({
+        tooltip: {
+          trigger: 'axis',
+          position: { right: 10, top: 10 },
+          padding: [5, 10, 5, 10],
+          formatter: (params: any[]) => {
+            const paramClose = params.find((p) => p.seriesName === 'close');
+            if (paramClose) {
+              return `${formatTimestampToUTC8(params[0].axisValue)} <b>${paramClose.value}</b>`
+            }
           }
         },
-        {
-          id: "price",
-          splitLine: {
-            show: true,
-            lineStyle: {
-              color: "#EEE"
-            }
-          },
+        xAxis: {
+          type: 'category',
+          data: curData.xAxis,
           axisLabel: {
-            show: true
-          },
-          axisLine: {
-            show: true,
-            lineStyle: {
-              width: 2
+            showMaxLabel: true,
+            interval: calculateInterval(curData.xAxis.length, chartElement.offsetWidth),
+            formatter: (value: any) => {
+              const utc8Time = formatTimestampToUTC8(value);
+              return `${utc8Time.slice(0, 10)}\n${utc8Time.slice(11)}`;
             }
-          },
-          axisTick: {
-            show: true
-          },
-          type: "value",
-          max: "dataMax",
-          min: "dataMin",
-          nameLocation: "middle",
-          nameRotate: 270,
-          nameGap: 30
-        }
-      ],
-      series: initialData.series.map((s: any) => ({
-        ...s,
-        type: 'line',
-        symbol: 'none',
-        smooth: true,
-        animation: false,
-        yAxisIndex: ["close", "close_ma"].includes(s.name) ? 1 : 0,
-        itemStyle: {
-          color: COLORS[s.name].color
-        }
-      }))
-    });
-
-    // 调用resize确保尺寸正确
-    chart.resize();
-
-    setCharts(prev => ({
-      ...prev,
-      [type]: { data: initialData, kTime: initialData.xAxis.slice(-1)[0], instance: chart }
-    }));
-  }, [chartRefs]);
-
-  const updateCharts = useCallback(async () => {
-    if (isUpdating.current) return;
-    isUpdating.current = true;
-
-    try {
-      await Promise.all(Object.entries(charts).map(async ([type, state]) => {
-        const chartType = type as ChartType;
-        if (!state.instance || !state.kTime) return;
-
-        const newData = await createApiRequest(
-          `http://127.0.0.1:5000/next_data/${chartType}/${state.kTime}`
-        );
-        if (!newData) return;
-
-        const option = state.instance.getOption() as any;
-        const newXData = [...option.xAxis[0].data.slice(1), newData.xAxis];
-        const newSeries = option.series.map((s: any, i: number) => ({
-          ...s,
-          data: [...s.data.slice(1), newData.series[i]]
-        }));
-
-        state.instance.setOption({
-          xAxis: [{
-            data: newXData,
+          }
+        },
+        yAxis: [
+          {
+            id: "model",
+            type: "value",
             axisLabel: {
-              showMaxLabel: true,
-              formatter: (value: any) => {
-                const utc8Time = formatTimestampToUTC8(value);
-                return `${utc8Time.slice(0, 10)}\n${utc8Time.slice(11)}`;
-              }
+              show: false
+            },
+            axisTick: {
+              show: false
+            },
+            axisPointer: {
+              show: false
+            },
+            splitLine: {
+              show: false
             }
-          }],
-          series: newSeries
-        }, { replaceMerge: ['xAxis', 'series'] });
+          },
+          {
+            id: "price",
+            splitLine: {
+              show: true,
+              lineStyle: {
+                color: "#EEE"
+              }
+            },
+            axisLabel: {
+              show: true
+            },
+            axisLine: {
+              show: true,
+              lineStyle: {
+                width: 2
+              }
+            },
+            axisTick: {
+              show: true
+            },
+            type: "value",
+            max: "dataMax",
+            min: "dataMin",
+            nameLocation: "middle",
+            nameRotate: 270,
+            nameGap: 30
+          }
+        ],
+        series: Object.keys(curData.series).map((k: string) => ({
+          name: k,
+          data: curData.series[k],
+          type: 'line',
+          symbol: 'none',
+          smooth: true,
+          animation: false,
+          yAxisIndex: ["close", "close_ma"].includes(k) ? 1 : 0,
+          itemStyle: {
+            color: COLORS[k].color
+          }
+        }))
+      });
 
-        setCharts(prev => ({
-          ...prev,
-          [chartType]: { ...prev[chartType], kTime: newData.xAxis }
-        }));
+      setData(prevData => ({
+        ...prevData,
+        [chartType]: {
+          ...curData,
+          instance: chart,
+        },
+        instance: init ? chart : chartData.instance,
       }));
-    } finally {
-      isUpdating.current = false;
-    }
-  }, [charts]);
+    });
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') {
+      if (e.key === 'ArrowRight' && !isUpdating.current) {
+        isUpdating.current = true;
         e.preventDefault();
-        updateCharts();
+        updateChart();
+        setTimeout(() => isUpdating.current = false, 100); // 100ms 后允许再次调用
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [updateCharts]);
+  }, [updateChart]);
 
   useLayoutEffect(() => {
-    (['signal', 'trend', 'scope'] as ChartType[]).forEach(initChart);
-    return () => {
-      Object.values(charts).forEach(state => state.instance?.dispose());
-    };
+    updateChart(true);
   }, []);
+
 
   return (
     <main className="w-full h-full flex flex-col items-center">
       {(['signal', 'trend', 'scope'] as ChartType[]).map((type) => (
         <div
           key={type}
-          className="w-full h-[50vh] rounded-lg shadow-sm"
+          className="w-full h-[50vh]"
           ref={el => chartRefs.current[type] = el!}
-          tabIndex={0}
           onKeyDown={(e) => e.preventDefault()}
         />
       ))}
+      {/* 悬浮在右上角的参数修改浮窗 */}
+      <div className="absolute top-0 left-0 p-4">
+        <div className="flex flex-col items-start">
+          <label className='text-sm text-gray-500 whitespace-nowrap'>品种: v</label>
+          <StepSelector initialStep={stepRef.current} onStepChange={handleStepChange} />
+        </div>
+      </div>
     </main>
   );
 }
