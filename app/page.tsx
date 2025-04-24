@@ -3,12 +3,16 @@ import axios from 'axios';
 import React, { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import StepSelector from '../lib/StepSelector';
 import * as echarts from 'echarts';
-import { COLORS } from '../lib/colors.js';
+import { COLORS } from '../lib/colors';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 dayjs.extend(utc);
 dayjs.extend(timezone);
+
+const axiosClient = axios.create({
+  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL, // 设置全局请求url前缀
+});
 
 type ChartType = 'signal' | 'trend' | 'scope';
 
@@ -26,7 +30,7 @@ interface KTimeInfo {
 }
 
 const createApiRequest = (url: string) =>
-  axios.get(url).then(r => r.data).catch(e => {
+  axiosClient.get(url).then(r => r.data).catch(e => {
     console.error('Request error:', e);
     return null;
   });
@@ -72,7 +76,7 @@ const getKTimeInfo = async () => {
   }
 
   // 否则从服务器获取kTimeInfo
-  kTimeInfo = await createApiRequest(`http://127.0.0.1:5000/k_time_info`);
+  kTimeInfo = await createApiRequest(`/k_time_info`);
   if (!kTimeInfo) {
     console.error('Failed to fetch kTimeInfo from Server.');
   }
@@ -86,7 +90,7 @@ export default function Home() {
     scope: { xAxis: [], series: {}, kTime: "20250121031000", instance: null, chartLength: 6000 }
   });
   const kTimeRef = useRef<string>("");
-  const chartRefs = useRef<Record<ChartType, HTMLDivElement>>({} as any);
+  const chartRefs = useRef<Record<ChartType, HTMLDivElement | null>>({} as any);
   const isUpdating = useRef<boolean>(false);
   const stepRef = useRef<number>(5);
 
@@ -113,7 +117,7 @@ export default function Home() {
 
       const front = init;
       const size = init ? chartData.chartLength : stepRef.current;
-      const newData: ChartData = await createApiRequest(`http://127.0.0.1:5000/chart_data/${chartType}/${kTimeRef.current}?front=${front}&size=${size}`);
+      const newData: ChartData = await createApiRequest(`/chart_data/${chartType}/${kTimeRef.current}?front=${front}&size=${size}`);
       if (!newData || !newData.xAxis || newData.xAxis.length == 0) {
         console.error('No more data');
         return;
@@ -244,13 +248,14 @@ export default function Home() {
         <div
           key={type}
           className="w-full h-[50vh]"
-          ref={el => chartRefs.current[type] = el!}
+          ref={(el) => { chartRefs.current[type] = el }}
           onKeyDown={(e) => e.preventDefault()}
         />
       ))}
       {/* 悬浮在右上角的参数修改浮窗 */}
       <div className="absolute top-0 left-0 p-4">
         <div className="flex flex-col items-start">
+          <label className='text-sm text-red-500 whitespace-nowrap'>短按[右键]回放波形图</label>
           <label className='text-sm text-gray-500 whitespace-nowrap'>品种: v</label>
           <StepSelector initialStep={stepRef.current} onStepChange={handleStepChange} />
         </div>

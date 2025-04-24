@@ -1,4 +1,8 @@
-export const COLORS = {
+type ColorEntry = {
+    color: string;
+};
+
+export const COLORS: Record<string, ColorEntry> = {
     "m_800": {
         "color": "rgb(150, 60, 0)"
     },
@@ -182,7 +186,9 @@ export const COLORS = {
     "ub": {
         "color": "rgb(43, 0, 181)"
     },
-    "lb": {},
+    "lb": {
+        "color": "rgb(43, 0, 181)"
+    },
     "close_ma": {
         "color": "gray"
     },
